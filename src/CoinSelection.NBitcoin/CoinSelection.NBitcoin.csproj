@@ -1,8 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-		<GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>NBitcoin adapter for bounded payment coin selection.</Description>
+    <PackageId>CoinSelection.NBitcoin</PackageId>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>NBitcoin adapter for changeless payment coin selection, with fee rates, caller-supplied input virtual sizes, and asymmetric target tolerances.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CoinSelection/CoinSelection.csproj" />
