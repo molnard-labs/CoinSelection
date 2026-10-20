@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-    <Description>Dependency-free, deterministic, bounded coin selection for integer-valued candidates.</Description>
+    <PackageId>CoinSelection</PackageId>
+    <Description>Dependency-free, deterministic coin selection for integer-valued candidates, with search budgets, per-candidate costs, input limits, and asymmetric target tolerances.</Description>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
