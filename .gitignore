@@ -1,0 +1,26 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+TestResults/
+artifacts/
+BenchmarkDotNet.Artifacts/
+.dotnet-home/
+.nuget/
+.scratch/
+.DS_Store
+Thumbs.db
+
+# Local documentation and research belong in the parent workspace.
+*.md
+*.log
+*.trx
+*.nupkg
+*.snupkg
+docs/
+benchmarks/
+private/
+research/
+.codex/

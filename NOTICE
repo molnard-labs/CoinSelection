@@ -1,0 +1,13 @@
+CoinSelection
+Copyright (c) 2026 Dávid Molnár and CoinSelection contributors
+
+The search design and changeless-payment selection behavior build on the
+MIT-licensed Wasabi Wallet implementation by The Wasabi Wallet Developers:
+https://github.com/WalletWasabi/WalletWasabi
+Source revision: 10de87edd613c4e6b1b5da73f7fc4727bdeba69b
+Relevant sources: WalletWasabi/Blockchain/TransactionBuilding/BranchAndBound.cs,
+BnB/, and ChangelessTransactionCoinSelector.cs.
+
+The original Wasabi search references Mark Erhardt's 2016 work:
+An Evaluation of Coin Selection Strategies, section 5.3, Branch and Bound.
+https://murch.one/erhardt2016coinselection.pdf

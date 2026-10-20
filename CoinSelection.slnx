@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CoinSelection/CoinSelection.csproj" />
+    <Project Path="src/CoinSelection.NBitcoin/CoinSelection.NBitcoin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CoinSelection.Tests/CoinSelection.Tests.csproj" />
+    <Project Path="tests/CoinSelection.NBitcoin.Tests/CoinSelection.NBitcoin.Tests.csproj" />
+  </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/CoinSelection.Example/CoinSelection.Example.csproj" />
+  </Folder>
+</Solution>
