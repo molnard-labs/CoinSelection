@@ -6,13 +6,18 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <Version>0.1.0-dev</Version>
+    <Version>0.1.0</Version>
     <Authors>Dávid Molnár;CoinSelection contributors</Authors>
+    <Copyright>Copyright (c) 2026 Dávid Molnár and CoinSelection contributors</Copyright>
     <RepositoryUrl>https://github.com/molnard/CoinSelection</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageProjectUrl>https://github.com/molnard/CoinSelection</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>coinselection;bitcoin;utxo;branch-and-bound;subset-sum</PackageTags>
+    <PackageReleaseNotes>Initial public release.</PackageReleaseNotes>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <EnableStrictModeForCompatibleFrameworksInPackage>true</EnableStrictModeForCompatibleFrameworksInPackage>
     <DebugType>embedded</DebugType>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
