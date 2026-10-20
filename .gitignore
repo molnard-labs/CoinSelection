@@ -15,6 +15,7 @@ Thumbs.db
 
 # Local documentation and research belong in the parent workspace.
 *.md
+!/README.md
 *.log
 *.trx
 *.nupkg
