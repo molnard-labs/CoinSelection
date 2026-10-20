@@ -54,9 +54,34 @@ if (bitcoinResult.HasSelection)
 }
 
 Console.WriteLine();
+Console.WriteLine("NBitcoin: separate below/above payment suggestions from one shared search.");
+var suggestions = BitcoinCoinSelector.SelectBoth(bitcoinInputs, requestedPayment, feeRate,
+	fixedVirtualSize: 50,
+	options: new SelectionOptions
+	{
+		MaximumShortfall = 500,
+		MaximumExcess = 100,
+		MaximumInputCount = 3,
+		MaximumSearchNodes = 100_000
+	});
+PrintSuggestion("At most", suggestions.AtMostTarget);
+PrintSuggestion("At least", suggestions.AtLeastTarget);
+Console.WriteLine($"Shared nodes: {suggestions.VisitedNodes}");
+
+Console.WriteLine();
 Console.WriteLine("SearchLimitReached may contain a usable selection, without proving optimality.");
 Console.WriteLine("Callers must estimate all overhead (including CompactSize counts) and each input's signing path.");
 Console.WriteLine("These are synthetic UTXOs; the example does not build, sign, or broadcast a transaction.");
+
+static void PrintSuggestion(string label, BitcoinSelectionResult result)
+{
+	Console.WriteLine($"{label}: {result.Status}; optimal: {result.IsOptimal}");
+	if (result.HasSelection)
+	{
+		Console.WriteLine($"  Payment: {result.PaymentAmount.Satoshi} sat; difference: {result.PaymentDifference.Satoshi:+0;-0;0} sat");
+		Console.WriteLine($"  Inputs: {result.InputCount}; estimated fee: {result.EstimatedFee.Satoshi} sat");
+	}
+}
 
 static BitcoinInput DemoInput(int id, long satoshis)
 {
