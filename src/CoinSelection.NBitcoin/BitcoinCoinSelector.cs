@@ -43,6 +43,58 @@ public static class BitcoinCoinSelector
 		bool groupByScriptPubKey = true,
 		CancellationToken cancellationToken = default)
 	{
+		PreparedSelection prepared = Prepare(inputs, paymentAmount, feeRate, fixedVirtualSize, options, groupByScriptPubKey);
+		var selection = CoinSelector.Select(prepared.Candidates, prepared.Target, prepared.Options, cancellationToken);
+		return MapResult(selection, prepared.FixedFee, paymentAmount);
+	}
+
+	/// <summary>Searches once for separate changeless payment suggestions on or below and on or above the requested amount.</summary>
+	/// <param name="inputs">Available coins and their positive input virtual-size estimates.</param>
+	/// <param name="paymentAmount">The positive payment amount requested by the caller.</param>
+	/// <param name="feeRate">The nonnegative fee rate used for each size estimate.</param>
+	/// <param name="fixedVirtualSize">Nonnegative virtual bytes for all non-input transaction overhead and outputs, as in <see cref="Select"/>.</param>
+	/// <param name="options">
+	/// Shared search constraints and resource limits, or defaults when omitted. Mode is ignored.
+	/// MaximumShortfall and MaximumExcess constrain the respective payment suggestions after all estimated fees.
+	/// MinimumValue constrains selected value after input fees and before the fixed fee; every suggested payment is positive.
+	/// </param>
+	/// <param name="groupByScriptPubKey">Whether all coins sharing a script must be selected together.</param>
+	/// <param name="cancellationToken">Cancels the shared search, preserving each side's best valid suggestion.</param>
+	/// <returns>Independent results for both inclusive sides and the shared number of visited nodes.</returns>
+	/// <remarks>
+	/// An exact payment is eligible on both sides. Inputs are validated, grouped and assigned estimated fees once.
+	/// The two results share one node budget and cancellation token. Check each side's HasSelection and Status independently.
+	/// Fee rounding, positive-effective-value grouping and caller ownership are the same as for <see cref="Select"/>.
+	/// This method does not construct, sign or broadcast a transaction.
+	/// </remarks>
+	/// <exception cref="ArgumentNullException">A required argument, input, coin, outpoint, or output is null.</exception>
+	/// <exception cref="ArgumentException">Outpoints are null Bitcoin outpoints or duplicated, or a coin is not denominated in Bitcoin.</exception>
+	/// <exception cref="ArgumentOutOfRangeException">An amount, fee rate, size, or search constraint is outside the documented range.</exception>
+	/// <exception cref="OverflowException">Amounts or fees cannot be represented by signed 64-bit satoshi values.</exception>
+	public static BitcoinTwoSidedSelectionResult SelectBoth(
+		IReadOnlyList<BitcoinInput> inputs,
+		Money paymentAmount,
+		FeeRate feeRate,
+		int fixedVirtualSize,
+		SelectionOptions? options = null,
+		bool groupByScriptPubKey = true,
+		CancellationToken cancellationToken = default)
+	{
+		PreparedSelection prepared = Prepare(inputs, paymentAmount, feeRate, fixedVirtualSize, options, groupByScriptPubKey);
+		var selection = CoinSelector.SelectBoth(prepared.Candidates, prepared.Target, prepared.Options, cancellationToken);
+		return new BitcoinTwoSidedSelectionResult(
+			MapResult(selection.AtMostTarget, prepared.FixedFee, paymentAmount),
+			MapResult(selection.AtLeastTarget, prepared.FixedFee, paymentAmount), selection.VisitedNodes);
+	}
+
+	private static PreparedSelection Prepare(
+		IReadOnlyList<BitcoinInput> inputs,
+		Money paymentAmount,
+		FeeRate feeRate,
+		int fixedVirtualSize,
+		SelectionOptions? options,
+		bool groupByScriptPubKey)
+	{
 		ArgumentNullException.ThrowIfNull(inputs);
 		ArgumentNullException.ThrowIfNull(paymentAmount);
 		ArgumentNullException.ThrowIfNull(feeRate);
@@ -113,7 +165,11 @@ public static class BitcoinCoinSelector
 			}
 		}
 
-		var selection = CoinSelector.Select(candidates, target, options, cancellationToken);
+		return new PreparedSelection(candidates, target, fixedFee, options);
+	}
+
+	private static BitcoinSelectionResult MapResult(SelectionResult<InputGroup> selection, long fixedFee, Money paymentAmount)
+	{
 		List<(int Index, BitcoinInput Input)> selectedInputs = new();
 		long totalAmount = 0;
 		foreach (SelectionCandidate<InputGroup> candidate in selection.SelectedCandidates)
@@ -143,4 +199,7 @@ public static class BitcoinCoinSelector
 		public long Amount { get; set; }
 		public long InputFee { get; set; }
 	}
+
+	private readonly record struct PreparedSelection(
+		List<SelectionCandidate<InputGroup>> Candidates, long Target, long FixedFee, SelectionOptions Options);
 }

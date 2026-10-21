@@ -39,6 +39,74 @@ public static class CoinSelector
 		options ??= new SelectionOptions();
 		ValidateOptions(options);
 
+		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates);
+		if (cancellationToken.IsCancellationRequested)
+		{
+			return EmptyResult<T>(SelectionStatus.Cancelled);
+		}
+
+		long[] remainingValues = PrepareCandidates(sorted);
+		long maximumShortfall = Math.Min(options.MaximumDifference, options.MaximumShortfall);
+		long maximumExcess = Math.Min(options.MaximumDifference, options.MaximumExcess);
+		long lowerValue = options.Mode == SelectionMode.AtLeastTarget
+			? target
+			: target > maximumShortfall ? target - maximumShortfall : 1;
+		long upperValue = options.Mode == SelectionMode.AtMostTarget
+			? target
+			: maximumExcess > long.MaxValue - target ? long.MaxValue : target + maximumExcess;
+		lowerValue = Math.Max(lowerValue, options.MinimumValue);
+		return Search(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
+	}
+
+	/// <summary>Finds separate best selections at or below and at or above the target in one search.</summary>
+	/// <typeparam name="T">The caller's item or group identifier.</typeparam>
+	/// <param name="candidates">Candidates to snapshot. Each candidate can be selected at most once per selection.</param>
+	/// <param name="target">The strictly positive desired value, in the candidates' integer units.</param>
+	/// <param name="options">Shared constraints and work limit. Mode is ignored; both directions are searched.</param>
+	/// <param name="cancellationToken">Cancels the shared search, retaining the best selection found on each side.</param>
+	/// <returns>Two independently ranked results with one shared visited-node count.</returns>
+	/// <remarks>
+	/// Both directions include the target, so an exact selection can appear in both results.
+	/// Each side minimizes target difference, then cost, then underlying input count; remaining ties
+	/// retain the first selection in the same deterministic order as <see cref="Select{T}"/>.
+	/// Candidates are validated, snapshotted and sorted once. MaximumSearchNodes applies to the
+	/// combined traversal, not separately to each side. Each result reports the shared node count.
+	/// Cancellation and node exhaustion may leave either side without a selection or with an
+	/// unproven partial selection. Once the search begins, an empty allowed interval reports NoSolution.
+	/// Validation and snapshotting precede cancellation, as in Select. A token already cancelled at that
+	/// point returns Cancelled for both sides before their allowed intervals are examined.
+	/// </remarks>
+	/// <exception cref="ArgumentNullException">The candidate list is null.</exception>
+	/// <exception cref="ArgumentOutOfRangeException">The target or an option is invalid.</exception>
+	/// <exception cref="ArgumentException">A candidate has invalid value, cost, or input count.</exception>
+	/// <exception cref="OverflowException">Aggregate candidate values or costs exceed signed 64-bit values.</exception>
+	public static TwoSidedSelectionResult<T> SelectBoth<T>(
+		IReadOnlyList<SelectionCandidate<T>> candidates,
+		long target,
+		SelectionOptions? options = null,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(candidates);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(target);
+		options ??= new SelectionOptions();
+		ValidateOptions(options);
+		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates);
+		if (cancellationToken.IsCancellationRequested)
+		{
+			SelectionResult<T> cancelled = EmptyResult<T>(SelectionStatus.Cancelled);
+			return new TwoSidedSelectionResult<T>(cancelled, cancelled);
+		}
+
+		long[] remainingValues = PrepareCandidates(sorted);
+		long shortfall = Math.Min(options.MaximumDifference, options.MaximumShortfall);
+		long excess = Math.Min(options.MaximumDifference, options.MaximumExcess);
+		long lowerValue = Math.Max(options.MinimumValue, target > shortfall ? target - shortfall : 1);
+		long upperValue = SaturatingAdd(target, excess);
+		return SearchBoth(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
+	}
+
+	private static IndexedCandidate<T>[] SnapshotCandidates<T>(IReadOnlyList<SelectionCandidate<T>> candidates)
+	{
 		var sorted = new IndexedCandidate<T>[candidates.Count];
 		long aggregateValue = 0;
 		long aggregateCost = 0;
@@ -55,11 +123,11 @@ public static class CoinSelector
 			sorted[i] = new IndexedCandidate<T>(candidate, i);
 		}
 
-		if (cancellationToken.IsCancellationRequested)
-		{
-			return EmptyResult<T>(SelectionStatus.Cancelled);
-		}
+		return sorted;
+	}
 
+	private static long[] PrepareCandidates<T>(IndexedCandidate<T>[] sorted)
+	{
 		Array.Sort(sorted, static (left, right) =>
 		{
 			int comparison = right.Candidate.Value.CompareTo(left.Candidate.Value);
@@ -75,16 +143,6 @@ public static class CoinSelector
 
 			return comparison != 0 ? comparison : left.OriginalIndex.CompareTo(right.OriginalIndex);
 		});
-
-		long maximumShortfall = Math.Min(options.MaximumDifference, options.MaximumShortfall);
-		long maximumExcess = Math.Min(options.MaximumDifference, options.MaximumExcess);
-		long lowerValue = options.Mode == SelectionMode.AtLeastTarget
-			? target
-			: target > maximumShortfall ? target - maximumShortfall : 1;
-		long upperValue = options.Mode == SelectionMode.AtMostTarget
-			? target
-			: maximumExcess > long.MaxValue - target ? long.MaxValue : target + maximumExcess;
-		lowerValue = Math.Max(lowerValue, options.MinimumValue);
 
 		var remainingValues = new long[sorted.Length + 1];
 		int nextDistinct = sorted.Length;
@@ -104,7 +162,7 @@ public static class CoinSelector
 			remainingValues[i] = remainingValues[i + 1] + candidate.Value;
 		}
 
-		return Search(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
+		return remainingValues;
 	}
 
 	// Compile this loop fully on its first call, independent of tiered profile history.
@@ -264,6 +322,147 @@ public static class CoinSelector
 		return CreateResult(sorted, bestIndices, bestSelectedCount, bestValue, bestCost, bestInputCount, visitedNodes, status);
 	}
 
+	[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining |
+		System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+	private static TwoSidedSelectionResult<T> SearchBoth<T>(
+		IndexedCandidate<T>[] sorted,
+		long[] remainingValues,
+		long target,
+		SelectionOptions options,
+		long lowerValue,
+		long upperValue,
+		CancellationToken cancellationToken)
+	{
+		var selectedIndices = new int[Math.Min(sorted.Length, options.MaximumInputCount)];
+		int selectedCount = 0;
+		long currentValue = 0;
+		long currentCost = 0;
+		int currentInputCount = 0;
+		int depth = 0;
+		long visitedNodes = 0;
+		BestSelection atMost = default;
+		BestSelection atLeast = default;
+		long searchLower = lowerValue;
+		long searchUpper = upperValue;
+		SelectionStatus? stoppedStatus = null;
+
+		while (depth >= 0)
+		{
+			if (cancellationToken.IsCancellationRequested)
+			{
+				stoppedStatus = SelectionStatus.Cancelled;
+				break;
+			}
+
+			if (visitedNodes >= options.MaximumSearchNodes)
+			{
+				stoppedStatus = SelectionStatus.SearchLimitReached;
+				break;
+			}
+
+			visitedNodes++;
+			if (currentValue >= searchLower && currentValue <= searchUpper)
+			{
+				// Tighten each side independently: a near-target result on one side
+				// must not discard a more distant result needed on the other side.
+				if (currentValue <= target && atMost.TryUpdate(currentValue, currentCost, currentInputCount,
+					selectedIndices, selectedCount, atMostTarget: true))
+				{
+					searchLower = currentValue;
+				}
+
+				if (currentValue >= target && atLeast.TryUpdate(currentValue, currentCost, currentInputCount,
+					selectedIndices, selectedCount, atMostTarget: false))
+				{
+					searchUpper = currentValue;
+				}
+
+				if (currentValue == target && currentCost == 0 && currentInputCount == 1)
+				{
+					// This exact selection is unbeatable in both directions.
+					break;
+				}
+			}
+
+			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount ||
+				lowerValue > upperValue || currentValue >= searchUpper)
+			{
+				goto Backtrack;
+			}
+
+			bool bothDistancesAreFinal = atLeast.Indices is not null &&
+				(atLeast.Value == target || (lowerValue > target && atLeast.Value == lowerValue));
+			if (bothDistancesAreFinal && atLeast.SecondaryCannotImprove(currentCost, currentInputCount))
+			{
+				goto Backtrack;
+			}
+
+			SelectionCandidate<T> candidate = sorted[depth].Candidate;
+			long availableValue = searchUpper - currentValue;
+			if (candidate.Value <= availableValue)
+			{
+				int remainingCapacity = options.MaximumInputCount - currentInputCount;
+				long maximumAddition = remainingValues[depth];
+				if (remainingCapacity < sorted.Length - depth)
+				{
+					maximumAddition -= remainingValues[depth + remainingCapacity];
+				}
+
+				long maximumValue = currentValue + maximumAddition;
+				if (maximumValue < searchLower ||
+					(maximumValue < target && maximumValue == atMost.Value &&
+					 atMost.SecondaryCannotImprove(currentCost, currentInputCount)))
+				{
+					goto Backtrack;
+				}
+
+				if (candidate.InputCount <= remainingCapacity)
+				{
+					selectedIndices[selectedCount++] = depth;
+					currentValue += candidate.Value;
+					currentCost += candidate.Cost;
+					currentInputCount += candidate.InputCount;
+					depth++;
+					continue;
+				}
+			}
+
+			depth++;
+			while (depth < sorted.Length && sorted[depth].Candidate.Value > availableValue &&
+				visitedNodes < options.MaximumSearchNodes && !cancellationToken.IsCancellationRequested)
+			{
+				visitedNodes++;
+				depth++;
+			}
+			continue;
+
+		Backtrack:
+			if (selectedCount == 0)
+			{
+				break;
+			}
+
+			int includedDepth = selectedIndices[--selectedCount];
+			SelectionCandidate<T> includedCandidate = sorted[includedDepth].Candidate;
+			currentValue -= includedCandidate.Value;
+			currentCost -= includedCandidate.Cost;
+			currentInputCount -= includedCandidate.InputCount;
+			depth = sorted[includedDepth].NextDistinct;
+		}
+
+		SelectionStatus atMostStatus = lowerValue > target
+			? SelectionStatus.NoSolution
+			: stoppedStatus ?? (atMost.Indices is null ? SelectionStatus.NoSolution : SelectionStatus.Optimal);
+		SelectionStatus atLeastStatus = Math.Max(lowerValue, target) > upperValue
+			? SelectionStatus.NoSolution
+			: stoppedStatus ?? (atLeast.Indices is null ? SelectionStatus.NoSolution : SelectionStatus.Optimal);
+		return new TwoSidedSelectionResult<T>(
+			CreateResult(sorted, atMost.Indices, atMost.SelectedCount, atMost.Value, atMost.Cost,
+				atMost.InputCount, visitedNodes, atMostStatus),
+			CreateResult(sorted, atLeast.Indices, atLeast.SelectedCount, atLeast.Value, atLeast.Cost,
+				atLeast.InputCount, visitedNodes, atLeastStatus));
+	}
+
 	[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private static SelectionResult<T> CreateResult<T>(
 		IndexedCandidate<T>[] sorted,
@@ -340,6 +539,51 @@ public static class CoinSelector
 	private static long SaturatingAdd(long value, long addition) => addition > long.MaxValue - value ? long.MaxValue : value + addition;
 
 	private static SelectionResult<T> EmptyResult<T>(SelectionStatus status) => new([], 0, 0, 0, 0, status);
+
+	private struct BestSelection
+	{
+		public int[]? Indices;
+		public int SelectedCount;
+		public long Value;
+		public long Cost;
+		public int InputCount;
+
+		public readonly bool SecondaryCannotImprove(long cost, int inputCount) =>
+			Indices is not null && (cost > Cost || (cost == Cost && inputCount >= InputCount));
+
+		public bool TryUpdate(long value, long cost, int inputCount, int[] path, int selectedCount, bool atMostTarget)
+		{
+			if (Indices is not null)
+			{
+				bool better;
+				if (value != Value)
+				{
+					better = atMostTarget ? value > Value : value < Value;
+				}
+				else if (cost != Cost)
+				{
+					better = cost < Cost;
+				}
+				else
+				{
+					better = inputCount < InputCount;
+				}
+
+				if (!better)
+				{
+					return false;
+				}
+			}
+
+			Indices ??= new int[path.Length];
+			SelectedCount = selectedCount;
+			Value = value;
+			Cost = cost;
+			InputCount = inputCount;
+			CopySelection(path, Indices, selectedCount);
+			return true;
+		}
+	}
 
 	private readonly record struct IndexedCandidate<T>(SelectionCandidate<T> Candidate, int OriginalIndex, int NextDistinct = 0);
 }
