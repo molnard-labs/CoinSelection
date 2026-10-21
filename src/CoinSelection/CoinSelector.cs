@@ -45,7 +45,7 @@ public static class CoinSelector
 			return EmptyResult<T>(SelectionStatus.Cancelled);
 		}
 
-		long[] remainingValues = PrepareCandidates(sorted);
+		long[] remainingBounds = PrepareCandidates(sorted, useUniformCostBounds: true, out long uniformValue);
 		long maximumShortfall = Math.Min(options.MaximumDifference, options.MaximumShortfall);
 		long maximumExcess = Math.Min(options.MaximumDifference, options.MaximumExcess);
 		long lowerValue = options.Mode == SelectionMode.AtLeastTarget
@@ -56,7 +56,7 @@ public static class CoinSelector
 			: maximumExcess > long.MaxValue - target ? long.MaxValue : target + maximumExcess;
 		lowerValue = Math.Max(lowerValue, options.MinimumValue);
 		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
-		return Search(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
+		return Search(sorted, remainingBounds, uniformValue, target, options, lowerValue, upperValue, cancellationToken);
 	}
 
 	/// <summary>Finds separate best selections at or below and at or above the target in one search.</summary>
@@ -98,7 +98,7 @@ public static class CoinSelector
 			return new TwoSidedSelectionResult<T>(cancelled, cancelled);
 		}
 
-		long[] remainingValues = PrepareCandidates(sorted);
+		long[] remainingValues = PrepareCandidates(sorted, useUniformCostBounds: false, out _);
 		long shortfall = Math.Min(options.MaximumDifference, options.MaximumShortfall);
 		long excess = Math.Min(options.MaximumDifference, options.MaximumExcess);
 		long lowerValue = Math.Max(options.MinimumValue, target > shortfall ? target - shortfall : 1);
@@ -169,7 +169,7 @@ public static class CoinSelector
 		lowerValue += adjustment;
 	}
 
-	private static long[] PrepareCandidates<T>(IndexedCandidate<T>[] sorted)
+	private static long[] PrepareCandidates<T>(IndexedCandidate<T>[] sorted, bool useUniformCostBounds, out long uniformValue)
 	{
 		Array.Sort(sorted, static (left, right) =>
 		{
@@ -187,7 +187,11 @@ public static class CoinSelector
 			return comparison != 0 ? comparison : left.OriginalIndex.CompareTo(right.OriginalIndex);
 		});
 
-		var remainingValues = new long[sorted.Length + 1];
+		uniformValue = useUniformCostBounds && sorted.Length > 0 && sorted[0].Candidate.Value == sorted[^1].Candidate.Value
+			? sorted[0].Candidate.Value : 0;
+		// Equal values need only an arithmetic value bound. Reuse the same suffix
+		// buffer for cost bounds in that case; two-sided searches retain value bounds.
+		var remainingBounds = new long[sorted.Length + 1];
 		int nextDistinct = sorted.Length;
 		for (int i = sorted.Length - 1; i >= 0; i--)
 		{
@@ -202,10 +206,10 @@ public static class CoinSelector
 			}
 
 			sorted[i] = new IndexedCandidate<T>(candidate, sorted[i].OriginalIndex, nextDistinct);
-			remainingValues[i] = remainingValues[i + 1] + candidate.Value;
+			remainingBounds[i] = remainingBounds[i + 1] + (uniformValue != 0 ? candidate.Cost : candidate.Value);
 		}
 
-		return remainingValues;
+		return remainingBounds;
 	}
 
 	// Compile this loop fully on its first call, independent of tiered profile history.
@@ -214,7 +218,8 @@ public static class CoinSelector
 		System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
 	private static SelectionResult<T> Search<T>(
 		IndexedCandidate<T>[] sorted,
-		long[] remainingValues,
+		long[] remainingBounds,
+		long uniformValue,
 		long target,
 		SelectionOptions options,
 		long lowerValue,
@@ -303,15 +308,36 @@ public static class CoinSelector
 				// Every candidate consumes at least one input, so the largest remaining k values
 				// are an optimistic upper bound even when candidates represent larger groups.
 				int remainingCapacity = options.MaximumInputCount - currentInputCount;
-				long maximumAddition = remainingValues[depth];
-				if (remainingCapacity < sorted.Length - depth)
+				long maximumAddition;
+				if (uniformValue != 0)
 				{
-					maximumAddition -= remainingValues[depth + remainingCapacity];
+					maximumAddition = Math.Min(remainingCapacity, sorted.Length - depth) * uniformValue;
+				}
+				else
+				{
+					maximumAddition = remainingBounds[depth];
+					if (remainingCapacity < sorted.Length - depth)
+					{
+						maximumAddition -= remainingBounds[depth + remainingCapacity];
+					}
 				}
 				long maximumValue = currentValue + maximumAddition;
 				if (maximumValue < searchLower)
 				{
 					goto Backtrack;
+				}
+
+				if (distanceIsFinal && uniformValue != 0)
+				{
+					// Equal values are cost sorted: the first k remaining candidates
+					// give an optimistic cost for reaching the proven best value.
+					int neededCandidates = (int)((bestValue - currentValue) / uniformValue);
+					long minimumCost = currentCost + (remainingBounds[depth] - remainingBounds[depth + neededCandidates]);
+					if (minimumCost > bestCost ||
+						(minimumCost == bestCost && neededCandidates >= bestInputCount - currentInputCount))
+					{
+						goto Backtrack;
+					}
 				}
 
 				if (secondaryCannotImprove && maximumValue < target && target - maximumValue == bestDifference)
