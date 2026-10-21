@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Dávid Molnár;CoinSelection contributors</Authors>
     <Copyright>Copyright (c) 2026 Dávid Molnár and CoinSelection contributors</Copyright>
     <RepositoryUrl>https://github.com/molnard/CoinSelection</RepositoryUrl>
@@ -14,9 +14,12 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageProjectUrl>https://github.com/molnard/CoinSelection</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>coinselection;bitcoin;utxo;branch-and-bound;subset-sum</PackageTags>
-    <PackageReleaseNotes>Initial public release.</PackageReleaseNotes>
+    <PackageReleaseNotes>Add shared two-sided selection, configurable NBitcoin fee rounding, independent candidate and input limits, and improved pruning for bounded searches. Validate API compatibility with 0.1.0 and cover running cancellation and signed transactions.</PackageReleaseNotes>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.1.0</PackageValidationBaselineVersion>
+    <ApiCompatEnableRuleCannotChangeParameterName>true</ApiCompatEnableRuleCannotChangeParameterName>
     <EnableStrictModeForCompatibleFrameworksInPackage>true</EnableStrictModeForCompatibleFrameworksInPackage>
     <DebugType>embedded</DebugType>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>

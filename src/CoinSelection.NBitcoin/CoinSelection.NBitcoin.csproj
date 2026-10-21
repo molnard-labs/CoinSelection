@@ -3,7 +3,7 @@
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <PackageId>CoinSelection.NBitcoin</PackageId>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>NBitcoin adapter for changeless payment coin selection, with fee rates, caller-supplied input virtual sizes, and asymmetric target tolerances.</Description>
+    <Description>NBitcoin adapter for changeless payment coin selection, with configurable fee rounding, caller-supplied input virtual sizes, script grouping, and asymmetric target tolerances.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CoinSelection/CoinSelection.csproj" />
