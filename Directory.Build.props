@@ -17,6 +17,8 @@
     <PackageTags>coinselection;bitcoin;utxo;branch-and-bound;subset-sum</PackageTags>
     <PackageReleaseNotes>Initial public release.</PackageReleaseNotes>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.1.0</PackageValidationBaselineVersion>
+    <ApiCompatEnableRuleCannotChangeParameterName>true</ApiCompatEnableRuleCannotChangeParameterName>
     <EnableStrictModeForCompatibleFrameworksInPackage>true</EnableStrictModeForCompatibleFrameworksInPackage>
     <DebugType>embedded</DebugType>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
