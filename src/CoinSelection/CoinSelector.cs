@@ -61,7 +61,9 @@ public static class CoinSelector
 		lowerValue = Math.Max(lowerValue, options.MinimumValue);
 		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
 		long minimumDifference = MinimumPossibleDifference(target, lowerValue, upperValue, valueDivisor);
-		return Search(sorted, remainingBounds, uniformValue, minimumDifference, target, options, lowerValue, upperValue, cancellationToken);
+		return options.MaximumCandidateCount < Math.Min(sorted.Length, options.MaximumInputCount)
+			? Search<T, LimitedCandidateCount>(sorted, remainingBounds, uniformValue, minimumDifference, target, options, lowerValue, upperValue, cancellationToken)
+			: Search<T, UnlimitedCandidateCount>(sorted, remainingBounds, uniformValue, minimumDifference, target, options, lowerValue, upperValue, cancellationToken);
 	}
 
 	/// <summary>Finds separate best selections at or below and at or above the target in one search.</summary>
@@ -117,9 +119,11 @@ public static class CoinSelector
 		long atLeastLower = Math.Max(target, lowerValue);
 		long atLeastUpper = upperValue;
 		AlignValueBounds(ref atLeastLower, ref atLeastUpper, valueDivisor);
-		return SearchBoth(sorted, remainingValues, target, options, lowerValue, upperValue,
-			atMostLower <= atMostUpper ? atMostUpper : 0,
-			atLeastLower <= atLeastUpper ? atLeastLower : 0, cancellationToken);
+		long atMostMaximum = atMostLower <= atMostUpper ? atMostUpper : 0;
+		long atLeastMinimum = atLeastLower <= atLeastUpper ? atLeastLower : 0;
+		return options.MaximumCandidateCount < Math.Min(sorted.Length, options.MaximumInputCount)
+			? SearchBoth<T, LimitedCandidateCount>(sorted, remainingValues, target, options, lowerValue, upperValue, atMostMaximum, atLeastMinimum, cancellationToken)
+			: SearchBoth<T, UnlimitedCandidateCount>(sorted, remainingValues, target, options, lowerValue, upperValue, atMostMaximum, atLeastMinimum, cancellationToken);
 	}
 
 	private static IndexedCandidate<T>[] SnapshotCandidates<T>(IReadOnlyList<SelectionCandidate<T>> candidates, out long valueDivisor)
@@ -259,7 +263,7 @@ public static class CoinSelector
 	// Keep incumbent copying and result mapping outside its register allocation.
 	[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining |
 		System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
-	private static SelectionResult<T> Search<T>(
+	private static SelectionResult<T> Search<T, TCandidateLimit>(
 		IndexedCandidate<T>[] sorted,
 		long[] remainingBounds,
 		long uniformValue,
@@ -269,8 +273,13 @@ public static class CoinSelector
 		long lowerValue,
 		long upperValue,
 		CancellationToken cancellationToken)
+		where TCandidateLimit : struct
 	{
-		int pathCapacity = Math.Min(sorted.Length, Math.Min(options.MaximumInputCount, options.MaximumCandidateCount));
+		int pathCapacity = Math.Min(sorted.Length, options.MaximumInputCount);
+		if (typeof(TCandidateLimit) == typeof(LimitedCandidateCount))
+		{
+			pathCapacity = Math.Min(pathCapacity, options.MaximumCandidateCount);
+		}
 		var selectedIndices = new int[pathCapacity];
 		int selectedCount = 0;
 		long currentValue = 0;
@@ -329,7 +338,8 @@ public static class CoinSelector
 				}
 			}
 
-			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount || selectedCount == options.MaximumCandidateCount ||
+			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount ||
+				(typeof(TCandidateLimit) == typeof(LimitedCandidateCount) && selectedCount == options.MaximumCandidateCount) ||
 				lowerValue > upperValue || currentValue >= searchUpper)
 			{
 				goto Backtrack;
@@ -355,13 +365,16 @@ public static class CoinSelector
 				}
 			}
 
-			int remainingCandidates = Math.Min(remainingCapacity, options.MaximumCandidateCount - selectedCount);
-
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
+				int remainingCandidates = remainingCapacity;
+				if (typeof(TCandidateLimit) == typeof(LimitedCandidateCount))
+				{
+					remainingCandidates = Math.Min(remainingCandidates, options.MaximumCandidateCount - selectedCount);
+				}
 				// Every candidate consumes one candidate slot and at least one input. The
 				// largest remaining k values therefore bound both capacities optimistically.
 				long maximumAddition;
@@ -511,7 +524,7 @@ public static class CoinSelector
 
 	[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining |
 		System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
-	private static TwoSidedSelectionResult<T> SearchBoth<T>(
+	private static TwoSidedSelectionResult<T> SearchBoth<T, TCandidateLimit>(
 		IndexedCandidate<T>[] sorted,
 		long[] remainingValues,
 		long target,
@@ -521,8 +534,14 @@ public static class CoinSelector
 		long atMostMaximum,
 		long atLeastMinimum,
 		CancellationToken cancellationToken)
+		where TCandidateLimit : struct
 	{
-		var selectedIndices = new int[Math.Min(sorted.Length, Math.Min(options.MaximumInputCount, options.MaximumCandidateCount))];
+		int pathCapacity = Math.Min(sorted.Length, options.MaximumInputCount);
+		if (typeof(TCandidateLimit) == typeof(LimitedCandidateCount))
+		{
+			pathCapacity = Math.Min(pathCapacity, options.MaximumCandidateCount);
+		}
+		var selectedIndices = new int[pathCapacity];
 		int selectedCount = 0;
 		long currentValue = 0;
 		long currentCost = 0;
@@ -595,7 +614,8 @@ public static class CoinSelector
 				}
 			}
 
-			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount || selectedCount == options.MaximumCandidateCount ||
+			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount ||
+				(typeof(TCandidateLimit) == typeof(LimitedCandidateCount) && selectedCount == options.MaximumCandidateCount) ||
 				lowerValue > upperValue || currentValue >= searchUpper)
 			{
 				goto Backtrack;
@@ -617,13 +637,16 @@ public static class CoinSelector
 				}
 			}
 
-			int remainingCandidates = Math.Min(remainingCapacity, options.MaximumCandidateCount - selectedCount);
-
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
+				int remainingCandidates = remainingCapacity;
+				if (typeof(TCandidateLimit) == typeof(LimitedCandidateCount))
+				{
+					remainingCandidates = Math.Min(remainingCandidates, options.MaximumCandidateCount - selectedCount);
+				}
 				long maximumAddition = remainingValues[depth];
 				if (remainingCandidates < sorted.Length - depth)
 				{
@@ -862,6 +885,11 @@ public static class CoinSelector
 			return true;
 		}
 	}
+
+	// Value-type instantiations let the JIT remove candidate-limit checks entirely
+	// when that limit cannot bind. Neither tag is instantiated or adds a buffer.
+	private readonly struct UnlimitedCandidateCount { }
+	private readonly struct LimitedCandidateCount { }
 
 	private readonly record struct IndexedCandidate<T>(SelectionCandidate<T> Candidate, int OriginalIndex, int NextDistinct = 0);
 }
