@@ -177,7 +177,7 @@ public class SymmetryPruningTests
 			MaximumShortfall = 15,
 			MaximumExcess = 15,
 			MaximumInputCount = 8,
-			MaximumSearchNodes = 8
+			MaximumSearchNodes = 6
 		};
 
 		SelectionResult<int> first = CoinSelector.Select(candidates, 65, options, TestContext.Current.CancellationToken);

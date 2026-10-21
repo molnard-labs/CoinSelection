@@ -30,6 +30,7 @@ public sealed record SelectionOptions
 	public int MaximumInputCount { get; init; } = int.MaxValue;
 
 	/// <summary>Gets the positive maximum number of visited search nodes, including the root node.</summary>
+	/// <remarks>Forced omission chains and exhausted suffixes are contracted without entering additional nodes.</remarks>
 	public long MaximumSearchNodes { get; init; } = 100_000;
 
 	/// <summary>Gets the inclusive, nonnegative amount permitted below the target. Defaults to unlimited.</summary>

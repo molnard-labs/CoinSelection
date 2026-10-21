@@ -17,6 +17,8 @@ public static class CoinSelector
 	/// ascending cost, ascending input count, then original position, with inclusion visited first.
 	/// Equivalent candidates retain the earliest original references while skipping repeated combinations.
 	/// The node budget counts the root and each entered child, including nodes immediately pruned.
+	/// Forced omissions of candidates that exceed the value or input capacity are contracted within
+	/// the current node; scanning those candidates does not consume additional search nodes.
 	/// Suffix bounds account for the remaining input capacity, and each incumbent tightens the
 	/// searched value interval inclusively so equal-distance cost/count ties remain eligible.
 	/// Additional pruning can improve the result obtained within the same node budget.
@@ -72,6 +74,7 @@ public static class CoinSelector
 	/// retain the first selection in the same deterministic order as <see cref="Select{T}"/>.
 	/// Candidates are validated, snapshotted and sorted once. MaximumSearchNodes applies to the
 	/// combined traversal, not separately to each side. Each result reports the shared node count.
+	/// Forced omissions are contracted within the current node, as in Select.
 	/// Cancellation and node exhaustion may leave either side without a selection or with an
 	/// unproven partial selection. Once the search begins, an empty allowed interval reports NoSolution.
 	/// Validation and snapshotting precede cancellation, as in Select. A token already cancelled at that
@@ -301,13 +304,14 @@ public static class CoinSelector
 				goto Backtrack;
 			}
 
+		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
-			if (candidate.Value <= availableValue)
+			int remainingCapacity = options.MaximumInputCount - currentInputCount;
+			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
 				// Every candidate consumes at least one input, so the largest remaining k values
 				// are an optimistic upper bound even when candidates represent larger groups.
-				int remainingCapacity = options.MaximumInputCount - currentInputCount;
 				long maximumAddition;
 				if (uniformValue != 0)
 				{
@@ -348,29 +352,32 @@ public static class CoinSelector
 					goto Backtrack;
 				}
 
-				if (candidate.InputCount <= remainingCapacity)
-				{
-					selectedIndices[selectedCount++] = depth;
-					currentValue += candidate.Value;
-					currentCost += candidate.Cost;
-					currentInputCount += candidate.InputCount;
-					depth++;
-					continue;
-				}
+				selectedIndices[selectedCount++] = depth;
+				currentValue += candidate.Value;
+				currentCost += candidate.Cost;
+				currentInputCount += candidate.InputCount;
+				depth++;
+				continue;
 			}
 
-			// An impossible inclusion enters the omit child directly.
+			// Forced omissions keep the same prefix and have no inclusion branch.
+			// Contract them within this node, still observing cancellation while scanning.
 			depth++;
-			// Consecutive oversized candidates only enter omission children with
-			// unchanged path totals and incumbent. Count and cancel every node,
-			// while avoiding repeated rank and bound checks for the same path.
-			while (depth < sorted.Length && sorted[depth].Candidate.Value > availableValue &&
-				visitedNodes < options.MaximumSearchNodes && !cancellationToken.IsCancellationRequested)
+			while (depth < sorted.Length &&
+				(sorted[depth].Candidate.Value > availableValue || sorted[depth].Candidate.InputCount > remainingCapacity) &&
+				!cancellationToken.IsCancellationRequested)
 			{
-				visitedNodes++;
 				depth++;
 			}
-			continue;
+			if (cancellationToken.IsCancellationRequested)
+			{
+				continue;
+			}
+
+			if (depth < sorted.Length)
+			{
+				goto TryCandidate;
+			}
 
 		Backtrack:
 			if (selectedCount == 0)
@@ -386,6 +393,16 @@ public static class CoinSelector
 			// Once this candidate is omitted, choosing a later equivalent candidate
 			// repeats a combination already visited with the earlier reference.
 			depth = sorted[includedDepth].NextDistinct;
+			if (depth == sorted.Length)
+			{
+				if (cancellationToken.IsCancellationRequested)
+				{
+					stoppedStatus = SelectionStatus.Cancelled;
+					break;
+				}
+
+				goto Backtrack;
+			}
 		}
 
 		SelectionStatus status = stoppedStatus ?? (bestIndices is null ? SelectionStatus.NoSolution : SelectionStatus.Optimal);
@@ -467,11 +484,12 @@ public static class CoinSelector
 				goto Backtrack;
 			}
 
+		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
-			if (candidate.Value <= availableValue)
+			int remainingCapacity = options.MaximumInputCount - currentInputCount;
+			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
-				int remainingCapacity = options.MaximumInputCount - currentInputCount;
 				long maximumAddition = remainingValues[depth];
 				if (remainingCapacity < sorted.Length - depth)
 				{
@@ -486,25 +504,30 @@ public static class CoinSelector
 					goto Backtrack;
 				}
 
-				if (candidate.InputCount <= remainingCapacity)
-				{
-					selectedIndices[selectedCount++] = depth;
-					currentValue += candidate.Value;
-					currentCost += candidate.Cost;
-					currentInputCount += candidate.InputCount;
-					depth++;
-					continue;
-				}
+				selectedIndices[selectedCount++] = depth;
+				currentValue += candidate.Value;
+				currentCost += candidate.Cost;
+				currentInputCount += candidate.InputCount;
+				depth++;
+				continue;
 			}
 
 			depth++;
-			while (depth < sorted.Length && sorted[depth].Candidate.Value > availableValue &&
-				visitedNodes < options.MaximumSearchNodes && !cancellationToken.IsCancellationRequested)
+			while (depth < sorted.Length &&
+				(sorted[depth].Candidate.Value > availableValue || sorted[depth].Candidate.InputCount > remainingCapacity) &&
+				!cancellationToken.IsCancellationRequested)
 			{
-				visitedNodes++;
 				depth++;
 			}
-			continue;
+			if (cancellationToken.IsCancellationRequested)
+			{
+				continue;
+			}
+
+			if (depth < sorted.Length)
+			{
+				goto TryCandidate;
+			}
 
 		Backtrack:
 			if (selectedCount == 0)
@@ -518,6 +541,16 @@ public static class CoinSelector
 			currentCost -= includedCandidate.Cost;
 			currentInputCount -= includedCandidate.InputCount;
 			depth = sorted[includedDepth].NextDistinct;
+			if (depth == sorted.Length)
+			{
+				if (cancellationToken.IsCancellationRequested)
+				{
+					stoppedStatus = SelectionStatus.Cancelled;
+					break;
+				}
+
+				goto Backtrack;
+			}
 		}
 
 		SelectionStatus atMostStatus = lowerValue > Math.Min(target, upperValue)
