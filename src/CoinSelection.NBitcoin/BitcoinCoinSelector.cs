@@ -19,7 +19,10 @@ public static class BitcoinCoinSelector
 	/// MaximumShortfall and MaximumExcess constrain the suggested payment relative to paymentAmount,
 	/// after both input fees and the fixed fee. Use Closest mode to allow both sides in one search.
 	/// </param>
-	/// <param name="groupByScriptPubKey">Whether all coins sharing a script must be selected together.</param>
+	/// <param name="groupByScriptPubKey">
+	/// Whether all coins sharing a script must be selected together. MaximumCandidateCount counts script
+	/// groups when enabled and individual coins otherwise; MaximumInputCount always counts actual inputs.
+	/// </param>
 	/// <param name="cancellationToken">Cancels the bounded search.</param>
 	/// <returns>A snapshot of the selected references, estimated amounts, and core search status.</returns>
 	/// <remarks>
@@ -59,7 +62,10 @@ public static class BitcoinCoinSelector
 	/// after input fees but before the fixed fee; a strictly positive payment is always required.
 	/// MaximumShortfall and MaximumExcess constrain payment after all estimated fees.
 	/// </param>
-	/// <param name="groupByScriptPubKey">Whether all coins sharing a script must be selected together.</param>
+	/// <param name="groupByScriptPubKey">
+	/// Whether all coins sharing a script must be selected together. MaximumCandidateCount counts script
+	/// groups when enabled and individual coins otherwise; MaximumInputCount always counts actual inputs.
+	/// </param>
 	/// <param name="cancellationToken">Cancels the bounded search.</param>
 	/// <returns>A snapshot of the selected references, estimated amounts, and core search status.</returns>
 	/// <remarks>
@@ -100,7 +106,10 @@ public static class BitcoinCoinSelector
 	/// MaximumShortfall and MaximumExcess constrain the respective payment suggestions after all estimated fees.
 	/// MinimumValue constrains selected value after input fees and before the fixed fee; every suggested payment is positive.
 	/// </param>
-	/// <param name="groupByScriptPubKey">Whether all coins sharing a script must be selected together.</param>
+	/// <param name="groupByScriptPubKey">
+	/// Whether all coins sharing a script must be selected together. MaximumCandidateCount counts script
+	/// groups when enabled and individual coins otherwise; MaximumInputCount always counts actual inputs.
+	/// </param>
 	/// <param name="cancellationToken">Cancels the shared search, preserving each side's best valid suggestion.</param>
 	/// <returns>Independent results for both inclusive sides and the shared number of visited nodes.</returns>
 	/// <remarks>
@@ -138,7 +147,10 @@ public static class BitcoinCoinSelector
 	/// MaximumShortfall and MaximumExcess constrain the respective payments after all estimated fees.
 	/// MinimumValue constrains selected value after input fees and before the fixed fee; every suggested payment is positive.
 	/// </param>
-	/// <param name="groupByScriptPubKey">Whether all coins sharing a script must be selected together.</param>
+	/// <param name="groupByScriptPubKey">
+	/// Whether all coins sharing a script must be selected together. MaximumCandidateCount counts script
+	/// groups when enabled and individual coins otherwise; MaximumInputCount always counts actual inputs.
+	/// </param>
 	/// <param name="cancellationToken">Cancels the shared search, preserving each side's best valid suggestion.</param>
 	/// <returns>Independent results for both inclusive sides and the shared number of visited nodes.</returns>
 	/// <remarks>
