@@ -15,6 +15,7 @@ public static class CoinSelector
 	/// For <see cref="SelectionMode.Closest"/>, an otherwise tied above-target selection wins.
 	/// Remaining ties retain the first selection found. Search order is descending value,
 	/// ascending cost, ascending input count, then original position, with inclusion visited first.
+	/// Equivalent candidates retain the earliest original references while skipping repeated combinations.
 	/// The node budget counts the root and each entered child, including nodes immediately pruned.
 	/// Suffix bounds account for the remaining input capacity, and each incumbent tightens the
 	/// searched value interval inclusively so equal-distance cost/count ties remain eligible.
@@ -86,10 +87,21 @@ public static class CoinSelector
 		lowerValue = Math.Max(lowerValue, options.MinimumValue);
 
 		var remainingValues = new long[sorted.Length + 1];
-		remainingValues[0] = aggregateValue;
-		for (int i = 0; i < sorted.Length; i++)
+		int nextDistinct = sorted.Length;
+		for (int i = sorted.Length - 1; i >= 0; i--)
 		{
-			remainingValues[i + 1] = remainingValues[i] - sorted[i].Candidate.Value;
+			SelectionCandidate<T> candidate = sorted[i].Candidate;
+			if (i + 1 < sorted.Length)
+			{
+				SelectionCandidate<T> next = sorted[i + 1].Candidate;
+				if (candidate.Value != next.Value || candidate.Cost != next.Cost || candidate.InputCount != next.InputCount)
+				{
+					nextDistinct = i + 1;
+				}
+			}
+
+			sorted[i] = new IndexedCandidate<T>(candidate, sorted[i].OriginalIndex, nextDistinct);
+			remainingValues[i] = remainingValues[i + 1] + candidate.Value;
 		}
 
 		return Search(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
@@ -243,7 +255,9 @@ public static class CoinSelector
 			currentValue -= includedCandidate.Value;
 			currentCost -= includedCandidate.Cost;
 			currentInputCount -= includedCandidate.InputCount;
-			depth = includedDepth + 1;
+			// Once this candidate is omitted, choosing a later equivalent candidate
+			// repeats a combination already visited with the earlier reference.
+			depth = sorted[includedDepth].NextDistinct;
 		}
 
 		SelectionStatus status = stoppedStatus ?? (bestIndices is null ? SelectionStatus.NoSolution : SelectionStatus.Optimal);
@@ -327,5 +341,5 @@ public static class CoinSelector
 
 	private static SelectionResult<T> EmptyResult<T>(SelectionStatus status) => new([], 0, 0, 0, 0, status);
 
-	private readonly record struct IndexedCandidate<T>(SelectionCandidate<T> Candidate, int OriginalIndex);
+	private readonly record struct IndexedCandidate<T>(SelectionCandidate<T> Candidate, int OriginalIndex, int NextDistinct = 0);
 }
