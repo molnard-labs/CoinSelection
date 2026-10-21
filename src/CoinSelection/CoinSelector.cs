@@ -271,7 +271,7 @@ public static class CoinSelector
 		long bestCost = 0;
 		int bestInputCount = 0;
 		long bestDifference = long.MaxValue;
-		bool valueIsFinal = false;
+		bool distanceIsFinal = false;
 		int[]? bestIndices = null;
 		int bestSelectedCount = 0;
 		long searchLower = lowerValue;
@@ -280,7 +280,7 @@ public static class CoinSelector
 
 		// The selected path also holds the pending inclusion ancestors. Popping
 		// its last index returns directly to the next unexplored omission child.
-		while (depth >= 0)
+		while (true)
 		{
 			if (cancellationToken.IsCancellationRequested)
 			{
@@ -304,9 +304,7 @@ public static class CoinSelector
 					bestCost = currentCost;
 					bestInputCount = currentInputCount;
 					bestDifference = difference;
-					// These cases also prove a unique best value for the uniform cost bound.
-					valueIsFinal = difference == 0 || (lowerValue > target && currentValue == lowerValue) ||
-						(upperValue < target && currentValue == upperValue);
+					distanceIsFinal = difference == minimumDifference;
 					bestIndices ??= new int[pathCapacity];
 					bestSelectedCount = selectedCount;
 					CopySelection(selectedIndices, bestIndices, selectedCount);
@@ -326,18 +324,29 @@ public static class CoinSelector
 				goto Backtrack;
 			}
 
-			bool secondaryCannotImprove = bestIndices is not null &&
-				(currentCost > bestCost || (currentCost == bestCost && currentInputCount >= bestInputCount));
-			if (bestDifference == minimumDifference && secondaryCannotImprove)
+			if (distanceIsFinal &&
+				(currentCost > bestCost || (currentCost == bestCost && currentInputCount >= bestInputCount)))
 			{
 				// The request's minimum possible distance cannot improve any further.
 				goto Backtrack;
 			}
 
+			int remainingCapacity = options.MaximumInputCount - currentInputCount;
+			if (distanceIsFinal && bestCost == 0)
+			{
+				// Cost cannot improve on zero. Reserve only inputs that could improve
+				// the count, allowing Closest's otherwise tied above-target value.
+				int countImprovement = options.Mode == SelectionMode.Closest && bestValue < target ? 0 : 1;
+				remainingCapacity = Math.Min(remainingCapacity, bestInputCount - currentInputCount - countImprovement);
+				if (remainingCapacity <= 0)
+				{
+					goto Backtrack;
+				}
+			}
+
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
-			int remainingCapacity = options.MaximumInputCount - currentInputCount;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
 				// Every candidate consumes at least one input, so the largest remaining k values
@@ -361,7 +370,9 @@ public static class CoinSelector
 					goto Backtrack;
 				}
 
-				if (valueIsFinal && uniformValue != 0)
+				if (uniformValue != 0 && (bestValue == target ||
+					(lowerValue > target && bestValue == lowerValue) ||
+					(upperValue < target && bestValue == upperValue)))
 				{
 					// Equal values are cost sorted: the first k remaining candidates
 					// give an optimistic cost for reaching the proven best value.
@@ -374,12 +385,19 @@ public static class CoinSelector
 					}
 				}
 
-				if (secondaryCannotImprove && maximumValue < target && target - maximumValue == bestDifference)
+				if (!distanceIsFinal && maximumValue < target && target - maximumValue == bestDifference && bestIndices is not null &&
+					(currentCost > bestCost || (currentCost == bestCost && currentInputCount >= bestInputCount)))
 				{
 					// An equal-distance upper boundary is already terminal, and a fixed
 					// above-target lower boundary is covered by the distance floor.
 					// Only an equal-distance reachable maximum below target remains.
 					goto Backtrack;
+				}
+
+				if (distanceIsFinal && (candidate.Cost > bestCost - currentCost ||
+					(candidate.Cost == bestCost - currentCost && candidate.InputCount > bestInputCount - currentInputCount)))
+				{
+					goto ChargePrunedChild;
 				}
 
 				selectedIndices[selectedCount++] = depth;
@@ -407,6 +425,45 @@ public static class CoinSelector
 			if (depth < sorted.Length)
 			{
 				goto TryCandidate;
+			}
+			goto Backtrack;
+
+		ChargePrunedChild:
+			// The inclusion child cannot improve the proven distance or its secondary
+			// rank. Charge its node without pushing, evaluating and popping the path.
+			if (cancellationToken.IsCancellationRequested)
+			{
+				stoppedStatus = SelectionStatus.Cancelled;
+				break;
+			}
+			if (visitedNodes >= options.MaximumSearchNodes)
+			{
+				stoppedStatus = SelectionStatus.SearchLimitReached;
+				break;
+			}
+			visitedNodes++;
+			depth = sorted[depth].NextDistinct;
+			if (depth < sorted.Length)
+			{
+				// The omission child has the same already-ranked prefix. Enter it
+				// normally, then reuse the unchanged prefix bounds and capacities.
+				if (cancellationToken.IsCancellationRequested)
+				{
+					stoppedStatus = SelectionStatus.Cancelled;
+					break;
+				}
+				if (visitedNodes >= options.MaximumSearchNodes)
+				{
+					stoppedStatus = SelectionStatus.SearchLimitReached;
+					break;
+				}
+				visitedNodes++;
+				goto TryCandidate;
+			}
+			if (cancellationToken.IsCancellationRequested)
+			{
+				stoppedStatus = SelectionStatus.Cancelled;
+				break;
 			}
 
 		Backtrack:
@@ -463,7 +520,7 @@ public static class CoinSelector
 		long searchUpper = upperValue;
 		SelectionStatus? stoppedStatus = null;
 
-		while (depth >= 0)
+		while (true)
 		{
 			if (cancellationToken.IsCancellationRequested)
 			{
@@ -514,10 +571,19 @@ public static class CoinSelector
 				goto Backtrack;
 			}
 
+			int remainingCapacity = options.MaximumInputCount - currentInputCount;
+			if (bothDistancesAreFinal && atLeast.Cost == 0)
+			{
+				remainingCapacity = Math.Min(remainingCapacity, atLeast.InputCount - currentInputCount - 1);
+				if (remainingCapacity <= 0)
+				{
+					goto Backtrack;
+				}
+			}
+
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
-			int remainingCapacity = options.MaximumInputCount - currentInputCount;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
 				long maximumAddition = remainingValues[depth];
@@ -532,6 +598,12 @@ public static class CoinSelector
 					 atMost.SecondaryCannotImprove(currentCost, currentInputCount)))
 				{
 					goto Backtrack;
+				}
+
+				if (bothDistancesAreFinal && (candidate.Cost > atLeast.Cost - currentCost ||
+					(candidate.Cost == atLeast.Cost - currentCost && candidate.InputCount > atLeast.InputCount - currentInputCount)))
+				{
+					goto ChargePrunedChild;
 				}
 
 				selectedIndices[selectedCount++] = depth;
@@ -557,6 +629,41 @@ public static class CoinSelector
 			if (depth < sorted.Length)
 			{
 				goto TryCandidate;
+			}
+			goto Backtrack;
+
+		ChargePrunedChild:
+			if (cancellationToken.IsCancellationRequested)
+			{
+				stoppedStatus = SelectionStatus.Cancelled;
+				break;
+			}
+			if (visitedNodes >= options.MaximumSearchNodes)
+			{
+				stoppedStatus = SelectionStatus.SearchLimitReached;
+				break;
+			}
+			visitedNodes++;
+			depth = sorted[depth].NextDistinct;
+			if (depth < sorted.Length)
+			{
+				if (cancellationToken.IsCancellationRequested)
+				{
+					stoppedStatus = SelectionStatus.Cancelled;
+					break;
+				}
+				if (visitedNodes >= options.MaximumSearchNodes)
+				{
+					stoppedStatus = SelectionStatus.SearchLimitReached;
+					break;
+				}
+				visitedNodes++;
+				goto TryCandidate;
+			}
+			if (cancellationToken.IsCancellationRequested)
+			{
+				stoppedStatus = SelectionStatus.Cancelled;
+				break;
 			}
 
 		Backtrack:
