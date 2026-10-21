@@ -27,7 +27,16 @@ public sealed record SelectionOptions
 	public long MaximumDifference { get; init; } = long.MaxValue;
 
 	/// <summary>Gets the positive maximum sum of selected candidates' underlying input counts.</summary>
+	/// <remarks>Applies independently of <see cref="MaximumCandidateCount"/>. Defaults to unlimited.</remarks>
 	public int MaximumInputCount { get; init; } = int.MaxValue;
+
+	/// <summary>Gets the positive maximum number of selected candidates. Defaults to unlimited.</summary>
+	/// <remarks>
+	/// Each candidate counts once, including an indivisible group representing several inputs.
+	/// <see cref="MaximumInputCount"/> separately limits the sum of their underlying input counts.
+	/// Both limits apply independently to each result returned by <see cref="CoinSelector.SelectBoth{T}"/>.
+	/// </remarks>
+	public int MaximumCandidateCount { get; init; } = int.MaxValue;
 
 	/// <summary>Gets the positive maximum number of visited search nodes, including the root node.</summary>
 	/// <remarks>Forced omission chains and exhausted suffixes are contracted without entering additional nodes.</remarks>

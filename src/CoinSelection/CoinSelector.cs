@@ -17,9 +17,11 @@ public static class CoinSelector
 	/// ascending cost, ascending input count, then original position, with inclusion visited first.
 	/// Equivalent candidates retain the earliest original references while skipping repeated combinations.
 	/// The node budget counts the root and each entered child, including nodes immediately pruned.
+	/// Candidate and underlying-input limits apply independently; a grouped candidate consumes one
+	/// candidate slot and its declared number of inputs. Neither limit changes the ranking rules.
 	/// Forced omissions of candidates that exceed the value or input capacity are contracted within
 	/// the current node; scanning those candidates does not consume additional search nodes.
-	/// Suffix bounds account for the remaining input capacity, and each incumbent tightens the
+	/// Suffix bounds account for the remaining candidate and input capacity, and each incumbent tightens the
 	/// searched value interval inclusively so equal-distance cost/count ties remain eligible.
 	/// Additional pruning can improve the result obtained within the same node budget.
 	/// Validation and input snapshotting occur before cancellation is observed. Concurrent mutation
@@ -75,6 +77,7 @@ public static class CoinSelector
 	/// retain the first selection in the same deterministic order as <see cref="Select{T}"/>.
 	/// Candidates are validated, snapshotted and sorted once. MaximumSearchNodes applies to the
 	/// combined traversal, not separately to each side. Each result reports the shared node count.
+	/// MaximumCandidateCount and MaximumInputCount constrain each side's selection independently.
 	/// Forced omissions are contracted within the current node, as in Select.
 	/// Cancellation and node exhaustion may leave either side without a selection or with an
 	/// unproven partial selection. Once the search begins, an empty allowed interval reports NoSolution.
@@ -267,7 +270,7 @@ public static class CoinSelector
 		long upperValue,
 		CancellationToken cancellationToken)
 	{
-		int pathCapacity = Math.Min(sorted.Length, options.MaximumInputCount);
+		int pathCapacity = Math.Min(sorted.Length, Math.Min(options.MaximumInputCount, options.MaximumCandidateCount));
 		var selectedIndices = new int[pathCapacity];
 		int selectedCount = 0;
 		long currentValue = 0;
@@ -326,7 +329,7 @@ public static class CoinSelector
 				}
 			}
 
-			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount ||
+			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount || selectedCount == options.MaximumCandidateCount ||
 				lowerValue > upperValue || currentValue >= searchUpper)
 			{
 				goto Backtrack;
@@ -352,24 +355,26 @@ public static class CoinSelector
 				}
 			}
 
+			int remainingCandidates = Math.Min(remainingCapacity, options.MaximumCandidateCount - selectedCount);
+
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
-				// Every candidate consumes at least one input, so the largest remaining k values
-				// are an optimistic upper bound even when candidates represent larger groups.
+				// Every candidate consumes one candidate slot and at least one input. The
+				// largest remaining k values therefore bound both capacities optimistically.
 				long maximumAddition;
 				if (uniformValue != 0)
 				{
-					maximumAddition = Math.Min(remainingCapacity, sorted.Length - depth) * uniformValue;
+					maximumAddition = Math.Min(remainingCandidates, sorted.Length - depth) * uniformValue;
 				}
 				else
 				{
 					maximumAddition = remainingBounds[depth];
-					if (remainingCapacity < sorted.Length - depth)
+					if (remainingCandidates < sorted.Length - depth)
 					{
-						maximumAddition -= remainingBounds[depth + remainingCapacity];
+						maximumAddition -= remainingBounds[depth + remainingCandidates];
 					}
 				}
 				long maximumValue = currentValue + maximumAddition;
@@ -517,7 +522,7 @@ public static class CoinSelector
 		long atLeastMinimum,
 		CancellationToken cancellationToken)
 	{
-		var selectedIndices = new int[Math.Min(sorted.Length, options.MaximumInputCount)];
+		var selectedIndices = new int[Math.Min(sorted.Length, Math.Min(options.MaximumInputCount, options.MaximumCandidateCount))];
 		int selectedCount = 0;
 		long currentValue = 0;
 		long currentCost = 0;
@@ -590,7 +595,7 @@ public static class CoinSelector
 				}
 			}
 
-			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount ||
+			if (depth == sorted.Length || currentInputCount == options.MaximumInputCount || selectedCount == options.MaximumCandidateCount ||
 				lowerValue > upperValue || currentValue >= searchUpper)
 			{
 				goto Backtrack;
@@ -612,15 +617,17 @@ public static class CoinSelector
 				}
 			}
 
+			int remainingCandidates = Math.Min(remainingCapacity, options.MaximumCandidateCount - selectedCount);
+
 		TryCandidate:
 			SelectionCandidate<T> candidate = sorted[depth].Candidate;
 			long availableValue = searchUpper - currentValue;
 			if (candidate.Value <= availableValue && candidate.InputCount <= remainingCapacity)
 			{
 				long maximumAddition = remainingValues[depth];
-				if (remainingCapacity < sorted.Length - depth)
+				if (remainingCandidates < sorted.Length - depth)
 				{
-					maximumAddition -= remainingValues[depth + remainingCapacity];
+					maximumAddition -= remainingValues[depth + remainingCandidates];
 				}
 
 				long maximumValue = currentValue + maximumAddition;
@@ -778,9 +785,9 @@ public static class CoinSelector
 		}
 
 		if (options.MinimumValue <= 0 || options.MaximumDifference < 0 || options.MaximumShortfall < 0 || options.MaximumExcess < 0 ||
-			options.MaximumInputCount <= 0 || options.MaximumSearchNodes <= 0)
+			options.MaximumInputCount <= 0 || options.MaximumCandidateCount <= 0 || options.MaximumSearchNodes <= 0)
 		{
-			throw new ArgumentOutOfRangeException(nameof(options), "Value tolerances must be nonnegative; minimum value, input and search limits must be positive.");
+			throw new ArgumentOutOfRangeException(nameof(options), "Value tolerances must be nonnegative; minimum value, candidate, input and search limits must be positive.");
 		}
 	}
 

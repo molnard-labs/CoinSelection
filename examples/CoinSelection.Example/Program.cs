@@ -77,6 +77,19 @@ var nbitcoinFees = BitcoinCoinSelector.Select(
 PrintSuggestion("NBitcoin rounding", nbitcoinFees);
 
 Console.WriteLine();
+Console.WriteLine("Separate limits: one script group may contain three actual inputs.");
+var grouped = BitcoinCoinSelector.Select(
+	[DemoInput(5, 400, scriptId: 9), DemoInput(6, 300, scriptId: 9), DemoInput(7, 300, scriptId: 9)],
+	Money.Satoshis(1_000), FeeRate.Zero, fixedVirtualSize: 0,
+	options: new SelectionOptions
+	{
+		MaximumCandidateCount = 1,
+		MaximumInputCount = 3,
+		MaximumDifference = 0
+	});
+PrintSuggestion("One script group", grouped);
+
+Console.WriteLine();
 Console.WriteLine("SearchLimitReached may contain a usable selection, without proving optimality.");
 Console.WriteLine("Callers must estimate all overhead (including CompactSize counts) and each input's signing path.");
 Console.WriteLine("These are synthetic UTXOs; the example does not build, sign, or broadcast a transaction.");
@@ -91,10 +104,10 @@ static void PrintSuggestion(string label, BitcoinSelectionResult result)
 	}
 }
 
-static BitcoinInput DemoInput(int id, long satoshis)
+static BitcoinInput DemoInput(int id, long satoshis, int? scriptId = null)
 {
 	byte[] keyHash = new byte[20];
-	keyHash[^1] = (byte)id;
+	keyHash[^1] = (byte)(scriptId ?? id);
 	var coin = new Coin(
 		new OutPoint(uint256.Parse(id.ToString("x64")), 0),
 		new TxOut(Money.Satoshis(satoshis), new WitKeyId(keyHash).ScriptPubKey));
