@@ -69,6 +69,14 @@ PrintSuggestion("At least", suggestions.AtLeastTarget);
 Console.WriteLine($"Shared nodes: {suggestions.VisitedNodes}");
 
 Console.WriteLine();
+Console.WriteLine("NBitcoin fee policy: 1.2 sat/vB rounds a 68 vB input to 81 sat and a 10 vB fixed part to 12 sat.");
+var nbitcoinFees = BitcoinCoinSelector.Select(
+	[DemoInput(4, 1_093)], Money.Satoshis(1_000), new FeeRate(1.2m), fixedVirtualSize: 10,
+	feePolicy: BitcoinFeePolicy.NBitcoin, options: null, groupByScriptPubKey: true,
+	cancellationToken: default);
+PrintSuggestion("NBitcoin rounding", nbitcoinFees);
+
+Console.WriteLine();
 Console.WriteLine("SearchLimitReached may contain a usable selection, without proving optimality.");
 Console.WriteLine("Callers must estimate all overhead (including CompactSize counts) and each input's signing path.");
 Console.WriteLine("These are synthetic UTXOs; the example does not build, sign, or broadcast a transaction.");
