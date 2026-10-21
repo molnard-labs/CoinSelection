@@ -58,7 +58,8 @@ public static class CoinSelector
 			: maximumExcess > long.MaxValue - target ? long.MaxValue : target + maximumExcess;
 		lowerValue = Math.Max(lowerValue, options.MinimumValue);
 		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
-		return Search(sorted, remainingBounds, uniformValue, target, options, lowerValue, upperValue, cancellationToken);
+		long minimumDifference = MinimumPossibleDifference(target, lowerValue, upperValue, valueDivisor);
+		return Search(sorted, remainingBounds, uniformValue, minimumDifference, target, options, lowerValue, upperValue, cancellationToken);
 	}
 
 	/// <summary>Finds separate best selections at or below and at or above the target in one search.</summary>
@@ -172,6 +173,34 @@ public static class CoinSelector
 		lowerValue += adjustment;
 	}
 
+	private static long MinimumPossibleDifference(long target, long lowerValue, long upperValue, long divisor)
+	{
+		if (lowerValue > upperValue)
+		{
+			return long.MaxValue;
+		}
+
+		if (target < lowerValue)
+		{
+			return lowerValue - target;
+		}
+
+		if (target > upperValue)
+		{
+			return target - upperValue;
+		}
+
+		// Aligned bounds contain both neighboring multiples when the target lies inside.
+		// This is only a distance lower bound: neither multiple need be a subset sum.
+		if (divisor <= 1)
+		{
+			return 0;
+		}
+
+		long remainder = target % divisor;
+		return Math.Min(remainder, divisor - remainder);
+	}
+
 	private static long[] PrepareCandidates<T>(IndexedCandidate<T>[] sorted, bool useUniformCostBounds, out long uniformValue)
 	{
 		Array.Sort(sorted, static (left, right) =>
@@ -223,6 +252,7 @@ public static class CoinSelector
 		IndexedCandidate<T>[] sorted,
 		long[] remainingBounds,
 		long uniformValue,
+		long minimumDifference,
 		long target,
 		SelectionOptions options,
 		long lowerValue,
@@ -241,7 +271,7 @@ public static class CoinSelector
 		long bestCost = 0;
 		int bestInputCount = 0;
 		long bestDifference = long.MaxValue;
-		bool distanceIsFinal = false;
+		bool valueIsFinal = false;
 		int[]? bestIndices = null;
 		int bestSelectedCount = 0;
 		long searchLower = lowerValue;
@@ -274,8 +304,8 @@ public static class CoinSelector
 					bestCost = currentCost;
 					bestInputCount = currentInputCount;
 					bestDifference = difference;
-					// The request's distance floor needs checking only when the incumbent changes.
-					distanceIsFinal = difference == 0 || (lowerValue > target && currentValue == lowerValue) ||
+					// These cases also prove a unique best value for the uniform cost bound.
+					valueIsFinal = difference == 0 || (lowerValue > target && currentValue == lowerValue) ||
 						(upperValue < target && currentValue == upperValue);
 					bestIndices ??= new int[pathCapacity];
 					bestSelectedCount = selectedCount;
@@ -298,7 +328,7 @@ public static class CoinSelector
 
 			bool secondaryCannotImprove = bestIndices is not null &&
 				(currentCost > bestCost || (currentCost == bestCost && currentInputCount >= bestInputCount));
-			if (distanceIsFinal && secondaryCannotImprove)
+			if (bestDifference == minimumDifference && secondaryCannotImprove)
 			{
 				// The request's minimum possible distance cannot improve any further.
 				goto Backtrack;
@@ -331,7 +361,7 @@ public static class CoinSelector
 					goto Backtrack;
 				}
 
-				if (distanceIsFinal && uniformValue != 0)
+				if (valueIsFinal && uniformValue != 0)
 				{
 					// Equal values are cost sorted: the first k remaining candidates
 					// give an optimistic cost for reaching the proven best value.
@@ -347,7 +377,7 @@ public static class CoinSelector
 				if (secondaryCannotImprove && maximumValue < target && target - maximumValue == bestDifference)
 				{
 					// An equal-distance upper boundary is already terminal, and a fixed
-					// above-target lower boundary is covered by distanceIsFinal.
+					// above-target lower boundary is covered by the distance floor.
 					// Only an equal-distance reachable maximum below target remains.
 					goto Backtrack;
 				}
