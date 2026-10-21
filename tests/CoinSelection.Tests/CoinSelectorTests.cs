@@ -326,7 +326,9 @@ public class CoinSelectorTests
 	[Fact]
 	public void DeepSearchDoesNotUseTheCallStack()
 	{
-		SelectionCandidate<int>[] candidates = Enumerable.Range(0, 30_000).Select(i => new SelectionCandidate<int>(i, 2)).ToArray();
+		// GCD 1 keeps denomination pruning from bypassing the deep traversal.
+		SelectionCandidate<int>[] candidates = Enumerable.Range(0, 30_000)
+			.Select(i => new SelectionCandidate<int>(i, i == 0 ? 3 : 2)).ToArray();
 
 		SelectionResult<int> result = CoinSelector.Select(candidates, 1, new() { MaximumDifference = 0 }, cancellationToken: TestContext.Current.CancellationToken);
 

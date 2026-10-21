@@ -39,7 +39,7 @@ public static class CoinSelector
 		options ??= new SelectionOptions();
 		ValidateOptions(options);
 
-		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates);
+		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates, out long valueDivisor);
 		if (cancellationToken.IsCancellationRequested)
 		{
 			return EmptyResult<T>(SelectionStatus.Cancelled);
@@ -55,6 +55,7 @@ public static class CoinSelector
 			? target
 			: maximumExcess > long.MaxValue - target ? long.MaxValue : target + maximumExcess;
 		lowerValue = Math.Max(lowerValue, options.MinimumValue);
+		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
 		return Search(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
 	}
 
@@ -90,7 +91,7 @@ public static class CoinSelector
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(target);
 		options ??= new SelectionOptions();
 		ValidateOptions(options);
-		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates);
+		IndexedCandidate<T>[] sorted = SnapshotCandidates(candidates, out long valueDivisor);
 		if (cancellationToken.IsCancellationRequested)
 		{
 			SelectionResult<T> cancelled = EmptyResult<T>(SelectionStatus.Cancelled);
@@ -102,14 +103,16 @@ public static class CoinSelector
 		long excess = Math.Min(options.MaximumDifference, options.MaximumExcess);
 		long lowerValue = Math.Max(options.MinimumValue, target > shortfall ? target - shortfall : 1);
 		long upperValue = SaturatingAdd(target, excess);
+		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
 		return SearchBoth(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
 	}
 
-	private static IndexedCandidate<T>[] SnapshotCandidates<T>(IReadOnlyList<SelectionCandidate<T>> candidates)
+	private static IndexedCandidate<T>[] SnapshotCandidates<T>(IReadOnlyList<SelectionCandidate<T>> candidates, out long valueDivisor)
 	{
 		var sorted = new IndexedCandidate<T>[candidates.Count];
 		long aggregateValue = 0;
 		long aggregateCost = 0;
+		long divisor = 0;
 		for (int i = 0; i < sorted.Length; i++)
 		{
 			SelectionCandidate<T>? candidate = candidates[i];
@@ -120,10 +123,50 @@ public static class CoinSelector
 
 			aggregateValue = checked(aggregateValue + candidate.Value);
 			aggregateCost = checked(aggregateCost + candidate.Cost);
+			if (divisor != 1)
+			{
+				long value = candidate.Value;
+				while (divisor != 0)
+				{
+					long remainder = value % divisor;
+					value = divisor;
+					divisor = remainder;
+				}
+
+				divisor = value;
+			}
+
 			sorted[i] = new IndexedCandidate<T>(candidate, i);
 		}
 
+		valueDivisor = divisor;
 		return sorted;
+	}
+
+	private static void AlignValueBounds(ref long lowerValue, ref long upperValue, long divisor)
+	{
+		if (divisor <= 1 || lowerValue > upperValue)
+		{
+			return;
+		}
+
+		// Every subset sum is a multiple of the candidates' greatest common divisor.
+		upperValue -= upperValue % divisor;
+		long remainder = lowerValue % divisor;
+		if (remainder == 0)
+		{
+			return;
+		}
+
+		long adjustment = divisor - remainder;
+		if (lowerValue > upperValue || adjustment > upperValue - lowerValue)
+		{
+			// No multiple fits, including when rounding up would exceed long.MaxValue.
+			upperValue = 0;
+			return;
+		}
+
+		lowerValue += adjustment;
 	}
 
 	private static long[] PrepareCandidates<T>(IndexedCandidate<T>[] sorted)
@@ -224,7 +267,8 @@ public static class CoinSelector
 					bestInputCount = currentInputCount;
 					bestDifference = difference;
 					// The request's distance floor needs checking only when the incumbent changes.
-					distanceIsFinal = difference == 0 || (lowerValue > target && currentValue == lowerValue);
+					distanceIsFinal = difference == 0 || (lowerValue > target && currentValue == lowerValue) ||
+						(upperValue < target && currentValue == upperValue);
 					bestIndices ??= new int[pathCapacity];
 					bestSelectedCount = selectedCount;
 					CopySelection(selectedIndices, bestIndices, selectedCount);
@@ -450,7 +494,7 @@ public static class CoinSelector
 			depth = sorted[includedDepth].NextDistinct;
 		}
 
-		SelectionStatus atMostStatus = lowerValue > target
+		SelectionStatus atMostStatus = lowerValue > Math.Min(target, upperValue)
 			? SelectionStatus.NoSolution
 			: stoppedStatus ?? (atMost.Indices is null ? SelectionStatus.NoSolution : SelectionStatus.Optimal);
 		SelectionStatus atLeastStatus = Math.Max(lowerValue, target) > upperValue
