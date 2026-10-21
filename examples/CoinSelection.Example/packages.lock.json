@@ -18,7 +18,7 @@
       "coinselection.nbitcoin": {
         "type": "Project",
         "dependencies": {
-          "CoinSelection": "[0.1.0, )",
+          "CoinSelection": "[0.2.0, )",
           "NBitcoin": "[10.0.13, )"
         }
       },
