@@ -324,16 +324,16 @@ public class CoinSelectorTests
 	}
 
 	[Fact]
-	public void DeepSearchDoesNotUseTheCallStack()
+	public void LongForcedOmissionScanUsesOnlyTheRootNode()
 	{
-		// GCD 1 keeps denomination pruning from bypassing the deep traversal.
+		// GCD 1 keeps denomination pruning from bypassing the long omission scan.
 		SelectionCandidate<int>[] candidates = Enumerable.Range(0, 30_000)
 			.Select(i => new SelectionCandidate<int>(i, i == 0 ? 3 : 2)).ToArray();
 
 		SelectionResult<int> result = CoinSelector.Select(candidates, 1, new() { MaximumDifference = 0 }, cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(SelectionStatus.NoSolution, result.Status);
-		Assert.Equal(30_001, result.VisitedNodes);
+		Assert.Equal(1, result.VisitedNodes);
 	}
 
 	[Fact]
