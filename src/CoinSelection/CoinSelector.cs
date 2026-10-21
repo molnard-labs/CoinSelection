@@ -108,7 +108,15 @@ public static class CoinSelector
 		long lowerValue = Math.Max(options.MinimumValue, target > shortfall ? target - shortfall : 1);
 		long upperValue = SaturatingAdd(target, excess);
 		AlignValueBounds(ref lowerValue, ref upperValue, valueDivisor);
-		return SearchBoth(sorted, remainingValues, target, options, lowerValue, upperValue, cancellationToken);
+		long atMostLower = lowerValue;
+		long atMostUpper = Math.Min(target, upperValue);
+		AlignValueBounds(ref atMostLower, ref atMostUpper, valueDivisor);
+		long atLeastLower = Math.Max(target, lowerValue);
+		long atLeastUpper = upperValue;
+		AlignValueBounds(ref atLeastLower, ref atLeastUpper, valueDivisor);
+		return SearchBoth(sorted, remainingValues, target, options, lowerValue, upperValue,
+			atMostLower <= atMostUpper ? atMostUpper : 0,
+			atLeastLower <= atLeastUpper ? atLeastLower : 0, cancellationToken);
 	}
 
 	private static IndexedCandidate<T>[] SnapshotCandidates<T>(IReadOnlyList<SelectionCandidate<T>> candidates, out long valueDivisor)
@@ -505,6 +513,8 @@ public static class CoinSelector
 		SelectionOptions options,
 		long lowerValue,
 		long upperValue,
+		long atMostMaximum,
+		long atLeastMinimum,
 		CancellationToken cancellationToken)
 	{
 		var selectedIndices = new int[Math.Min(sorted.Length, options.MaximumInputCount)];
@@ -516,11 +526,14 @@ public static class CoinSelector
 		long visitedNodes = 0;
 		BestSelection atMost = default;
 		BestSelection atLeast = default;
+		bool bothDistancesAreFinal = false;
+		long pruningCost = 0;
+		int pruningInputCount = 0;
 		long searchLower = lowerValue;
 		long searchUpper = upperValue;
 		SelectionStatus? stoppedStatus = null;
 
-		while (true)
+		while (depth >= 0)
 		{
 			if (cancellationToken.IsCancellationRequested)
 			{
@@ -537,18 +550,37 @@ public static class CoinSelector
 			visitedNodes++;
 			if (currentValue >= searchLower && currentValue <= searchUpper)
 			{
+				bool updated = false;
 				// Tighten each side independently: a near-target result on one side
 				// must not discard a more distant result needed on the other side.
 				if (currentValue <= target && atMost.TryUpdate(currentValue, currentCost, currentInputCount,
 					selectedIndices, selectedCount, atMostTarget: true))
 				{
 					searchLower = currentValue;
+					updated = true;
 				}
 
 				if (currentValue >= target && atLeast.TryUpdate(currentValue, currentCost, currentInputCount,
 					selectedIndices, selectedCount, atMostTarget: false))
 				{
 					searchUpper = currentValue;
+					updated = true;
+				}
+
+				if (updated)
+				{
+					// Zero denotes an empty side. Each nonempty side must independently
+					// reach its own nearest lattice value before distance cannot improve.
+					bothDistancesAreFinal = atMost.Value == atMostMaximum && atLeast.Value == atLeastMinimum;
+					if (bothDistancesAreFinal)
+					{
+						// A branch remains eligible if it can improve either side. The
+						// lexicographically worse secondary rank is the permissive bound.
+						bool useAtLeast = atMost.Indices is null || (atLeast.Indices is not null &&
+							(atLeast.Cost > atMost.Cost || (atLeast.Cost == atMost.Cost && atLeast.InputCount > atMost.InputCount)));
+						pruningCost = useAtLeast ? atLeast.Cost : atMost.Cost;
+						pruningInputCount = useAtLeast ? atLeast.InputCount : atMost.InputCount;
+					}
 				}
 
 				if (currentValue == target && currentCost == 0 && currentInputCount == 1)
@@ -564,17 +596,16 @@ public static class CoinSelector
 				goto Backtrack;
 			}
 
-			bool bothDistancesAreFinal = atLeast.Indices is not null &&
-				(atLeast.Value == target || (lowerValue > target && atLeast.Value == lowerValue));
-			if (bothDistancesAreFinal && atLeast.SecondaryCannotImprove(currentCost, currentInputCount))
+			if (bothDistancesAreFinal &&
+				(currentCost > pruningCost || (currentCost == pruningCost && currentInputCount >= pruningInputCount)))
 			{
 				goto Backtrack;
 			}
 
 			int remainingCapacity = options.MaximumInputCount - currentInputCount;
-			if (bothDistancesAreFinal && atLeast.Cost == 0)
+			if (bothDistancesAreFinal && pruningCost == 0)
 			{
-				remainingCapacity = Math.Min(remainingCapacity, atLeast.InputCount - currentInputCount - 1);
+				remainingCapacity = Math.Min(remainingCapacity, pruningInputCount - currentInputCount - 1);
 				if (remainingCapacity <= 0)
 				{
 					goto Backtrack;
@@ -600,8 +631,8 @@ public static class CoinSelector
 					goto Backtrack;
 				}
 
-				if (bothDistancesAreFinal && (candidate.Cost > atLeast.Cost - currentCost ||
-					(candidate.Cost == atLeast.Cost - currentCost && candidate.InputCount > atLeast.InputCount - currentInputCount)))
+				if (bothDistancesAreFinal && (candidate.Cost > pruningCost - currentCost ||
+					(candidate.Cost == pruningCost - currentCost && candidate.InputCount > pruningInputCount - currentInputCount)))
 				{
 					goto ChargePrunedChild;
 				}

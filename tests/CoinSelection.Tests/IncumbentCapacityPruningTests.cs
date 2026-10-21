@@ -213,6 +213,82 @@ public class IncumbentCapacityPruningTests
 	}
 
 	[Fact]
+	public void TwoSidedNonexactDistanceFloorsRetainIndependentCostAndInputCountImprovements()
+	{
+		SelectionCandidate<int>[] candidates = [new(0, 14_700, 9), new(1, 14_600, 7), new(2, 10_000, 2, 4), new(3, 9_900, 1, 3), new(4, 4_700, 0, 2)];
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 14_617,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertRankAndReferences(result.AtMostTarget, 14_600, 1, 5, candidates[3], candidates[4]);
+		AssertRankAndReferences(result.AtLeastTarget, 14_700, 2, 6, candidates[2], candidates[4]);
+	}
+
+	[Fact]
+	public void ReachingTheBelowFloorDoesNotProveTheUnreachableNearestAboveValue()
+	{
+		SelectionCandidate<int>[] candidates = [new(0, 14_600, 9), new(1, 9_900, 1, 3), new(2, 4_700, 1, 2)];
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 14_617,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// 14700 is the nearest allowed above-target GCD multiple, but no subset reaches it.
+		AssertRankAndReferences(result.AtMostTarget, 14_600, 2, 5, candidates[1], candidates[2]);
+		AssertRankAndReferences(result.AtLeastTarget, 19_300, 10, 3, candidates[0], candidates[2]);
+	}
+
+	[Fact]
+	public void TwoSidedZeroCostCountPruningUsesTheLargerOfTheIndependentInputCounts()
+	{
+		SelectionCandidate<int>[] candidates = [new(0, 1_000, 0, 7), new(1, 900, 0, 2), new(2, 600, 0, 2), new(3, 400, 0, 3)];
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 950,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertRankAndReferences(result.AtMostTarget, 900, 0, 2, candidates[1]);
+		AssertRankAndReferences(result.AtLeastTarget, 1_000, 0, 5, candidates[2], candidates[3]);
+	}
+
+	[Fact]
+	public void TwoSidedLowerCostImprovementMayUseMoreInputsThanEitherEarlyIncumbent()
+	{
+		SelectionCandidate<int>[] candidates = [new(0, 1_000, 0, 2), new(1, 900, 5), new(2, 600, 1, 4), new(3, 300, 0, 4)];
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 950,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertRankAndReferences(result.AtMostTarget, 900, 1, 8, candidates[2], candidates[3]);
+		AssertRankAndReferences(result.AtLeastTarget, 1_000, 0, 2, candidates[0]);
+	}
+
+	[Fact]
+	public void TwoSidedMidpointResultsKeepTheirOwnReferencesAtEqualCostsAndCounts()
+	{
+		SelectionCandidate<int>[] candidates = [new(0, 900, 0, 4), new(1, 600, 0, 2), new(2, 400, 0, 2)];
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 950,
+			new() { MaximumDifference = 50 }, TestContext.Current.CancellationToken);
+
+		AssertRankAndReferences(result.AtMostTarget, 900, 0, 4, candidates[0]);
+		AssertRankAndReferences(result.AtLeastTarget, 1_000, 0, 4, candidates[1], candidates[2]);
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void AnEmptySideDoesNotPreventCheaperInputCountsOnTheRemainingSide(bool aboveOnly)
+	{
+		SelectionCandidate<int>[] candidates = aboveOnly
+			? [new(0, 1_000, 0, 7), new(1, 600, 0, 2), new(2, 400, 0, 3)]
+			: [new(0, 900, 0, 7), new(1, 600, 0, 2), new(2, 300, 0, 3)];
+		SelectionOptions options = aboveOnly
+			? new() { MinimumValue = 1_000, MaximumExcess = 50 }
+			: new() { MaximumShortfall = 50, MaximumExcess = 0 };
+		TwoSidedSelectionResult<int> result = CoinSelector.SelectBoth(candidates, 950, options, TestContext.Current.CancellationToken);
+		SelectionResult<int> feasible = aboveOnly ? result.AtLeastTarget : result.AtMostTarget;
+		SelectionResult<int> empty = aboveOnly ? result.AtMostTarget : result.AtLeastTarget;
+
+		Assert.Equal(SelectionStatus.NoSolution, empty.Status);
+		Assert.False(empty.HasSelection);
+		AssertRankAndReferences(feasible, aboveOnly ? 1_000 : 900, 0, 5, candidates[1], candidates[2]);
+	}
+
+	[Fact]
 	public void SmallWeightedRequestsMatchIndependentExhaustiveRanksAndCanonicalReferences()
 	{
 		Random random = new(93_287);
@@ -242,6 +318,16 @@ public class IncumbentCapacityPruningTests
 			AssertMatchesOracle(candidates, target, policy with { Mode = SelectionMode.AtMostTarget }, both.AtMostTarget);
 			AssertMatchesOracle(candidates, target, policy with { Mode = SelectionMode.AtLeastTarget }, both.AtLeastTarget);
 		}
+	}
+
+	private static void AssertRankAndReferences(SelectionResult<int> actual, long expectedValue, long expectedCost,
+		int expectedInputs, params SelectionCandidate<int>[] expected)
+	{
+		Assert.Equal(SelectionStatus.Optimal, actual.Status);
+		Assert.Equal(expectedValue, actual.TotalValue);
+		Assert.Equal(expectedCost, actual.TotalCost);
+		Assert.Equal(expectedInputs, actual.InputCount);
+		AssertReferences(actual, expected);
 	}
 
 	private static void AssertReferences(SelectionResult<int> actual, params SelectionCandidate<int>[] expected)
